@@ -43,7 +43,7 @@ function renderTrendChart(daily = []) {
   const target = $("trendChart");
   const rows = daily.slice(-18);
   if (!rows.length) {
-    target.innerHTML = '<div class="muted">暂无趋势数据</div>';
+    target.innerHTML = '<div class="empty-state">暂无趋势数据</div>';
     return;
   }
 
@@ -59,11 +59,7 @@ function renderTrendChart(daily = []) {
   const x = (index) => pad.left + index * (chartW / rows.length) + barGap / 2;
   const yKwh = (value) => pad.top + chartH - (value / maxKwh) * chartH;
   const yCost = (value) => pad.top + chartH - (value / maxCost) * chartH;
-  const points = rows.map((item, index) => {
-    const px = x(index) + barW / 2;
-    const py = yCost(item.cost);
-    return `${px},${py}`;
-  });
+  const points = rows.map((item, index) => `${x(index) + barW / 2},${yCost(item.cost)}`);
 
   const grid = [0, 0.25, 0.5, 0.75, 1]
     .map((ratio) => {
@@ -101,28 +97,8 @@ function renderTrendChart(daily = []) {
       ${bars}
       <polyline class="cost-line" points="${points.join(" ")}" />
       ${dots}
-      <text class="chart-label" x="${width - 120}" y="18">绿色: 度数</text>
-      <text class="chart-label" x="${width - 120}" y="34">黄色: 费用</text>
     </svg>
   `;
-}
-
-function renderSegments(segments = []) {
-  const total = segments.reduce((sum, item) => sum + Number(item.kwh || 0), 0) || 1;
-  $("segmentBars").innerHTML = segments.length
-    ? segments
-        .map((item) => {
-          const pct = Math.max(0, Math.min(100, (item.kwh / total) * 100));
-          return `
-            <div class="segment-row">
-              <div class="segment-name">${item.name}</div>
-              <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-              <div class="segment-value">${kwh(item.kwh)}</div>
-            </div>
-          `;
-        })
-        .join("")
-    : '<div class="muted">暂无电价时段数据</div>';
 }
 
 function renderSettlementInfo(snapshot) {
@@ -151,46 +127,49 @@ function renderRooms(rooms = []) {
   );
   const visibleRooms = activeRooms.length ? activeRooms : rooms;
   $("roomCaption").textContent = `${rooms.length} 个回路，${visibleRooms.length} 个有数据`;
-  $("rooms").innerHTML = visibleRooms
-    .map((room) => {
-      const latest = room.weekUsage?.at(-1);
-      return `
-        <div class="room-row">
-          <div class="room-title">
-            <strong>${room.roomName}</strong>
-            <span>${latest ? `${latest.label} ${kwh(latest.kwh)} / ${yuan(latest.cost)}` : "暂无最近用电"}</span>
-          </div>
-          <div class="room-value">${kwh(room.totals.monthKwh)}</div>
-          <div class="room-value">${yuan(room.totals.monthCost)}</div>
-        </div>
-      `;
-    })
-    .join("");
+  $("rooms").innerHTML = visibleRooms.length
+    ? visibleRooms
+        .map((room) => {
+          const latest = room.weekUsage?.at(-1);
+          return `
+            <div class="room-row">
+              <div class="room-title">
+                <strong>${room.roomName}</strong>
+                <span>${latest ? `${latest.label} ${kwh(latest.kwh)} / ${yuan(latest.cost)}` : "暂无最近用电"}</span>
+              </div>
+              <div class="room-value">${kwh(room.totals.monthKwh)}</div>
+              <div class="room-value">${yuan(room.totals.monthCost)}</div>
+            </div>
+          `;
+        })
+        .join("")
+    : '<div class="empty-state">暂无回路数据</div>';
 }
 
 function renderRecent(rows = []) {
   const max = Math.max(...rows.map((item) => item.kwh), 1);
-  $("recentTable").innerHTML = rows
-    .slice(-3)
-    .reverse()
-    .map((item) => {
-      const pct = Math.max(2, (item.kwh / max) * 100);
-      return `
-        <div class="recent-row">
-          <strong>${item.label}</strong>
-          <div class="recent-bar"><i style="width:${pct}%"></i></div>
-          <div class="recent-value">${kwh(item.kwh)}</div>
-          <div class="recent-value">${yuan(item.cost)}</div>
-        </div>
-      `;
-    })
-    .join("");
+  $("recentTable").innerHTML = rows.length
+    ? rows
+        .slice(-4)
+        .reverse()
+        .map((item) => {
+          const pct = Math.max(2, (item.kwh / max) * 100);
+          return `
+            <div class="recent-row">
+              <strong>${item.label}</strong>
+              <div class="recent-bar"><i style="width:${pct}%"></i></div>
+              <div class="recent-value">${kwh(item.kwh)}</div>
+              <div class="recent-value">${yuan(item.cost)}</div>
+            </div>
+          `;
+        })
+        .join("")
+    : '<div class="empty-state">暂无最近记录</div>';
 }
 
 function render(snapshot) {
-  $("schoolName").textContent = snapshot.schoolName
-    ? `${snapshot.schoolName}电费量化平台`
-    : "电费量化平台";
+  $("setupBanner").classList.add("hidden");
+  $("schoolName").textContent = snapshot.schoolName ? `${snapshot.schoolName}电费量化平台` : "电费量化平台";
   $("displayName").textContent = snapshot.displayName || snapshot.account?.userName || "宿舍用电";
   $("updatedAt").textContent = formatTime(snapshot.fetchedAt);
   $("balance").textContent = yuan(snapshot.account?.balance);
@@ -213,10 +192,27 @@ function render(snapshot) {
   renderRecent(snapshot.recent);
 }
 
+function renderSetupRequired(message) {
+  $("setupBanner").classList.remove("hidden");
+  $("displayName").textContent = "等待配置";
+  $("updatedAt").textContent = "打开配置页填写账号密码";
+  renderAlerts([{ level: "notice", title: "需要配置", detail: message || "请先完成网页配置" }]);
+  renderTrendChart([]);
+  renderSettlementInfo({ totals: {}, fetchedAt: null });
+  renderRooms([]);
+  renderRecent([]);
+}
+
 async function loadSnapshot() {
   const response = await fetch("/api/snapshot", { cache: "no-store" });
   const payload = await response.json();
-  if (!payload.ok) throw new Error(payload.error?.message || "暂无采集数据");
+  if (!payload.ok) {
+    if (payload.setupRequired) {
+      renderSetupRequired(payload.error?.message);
+      return;
+    }
+    throw new Error(payload.error?.message || "暂无采集数据");
+  }
   render(payload.data);
   $("refreshBtn").disabled = Boolean(payload.refreshing);
   $("refreshBtn").textContent = payload.refreshing ? "采集中" : "刷新";
@@ -243,6 +239,6 @@ $("refreshBtn").addEventListener("click", refreshNow);
 setClock();
 setInterval(setClock, 1000);
 loadSnapshot().catch((error) => {
-    renderAlerts([{ level: "notice", title: "等待数据采集", detail: error.message }]);
+  renderAlerts([{ level: "notice", title: "等待数据采集", detail: error.message }]);
 });
 setInterval(() => loadSnapshot().catch(() => {}), 60 * 1000);

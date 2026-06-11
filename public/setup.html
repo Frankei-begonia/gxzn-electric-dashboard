@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>配置电费状态屏</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="setup-body">
+    <main class="setup-shell">
+      <header class="setup-topbar">
+        <div>
+          <div class="eyebrow">本地部署向导</div>
+          <h1>配置电费状态屏</h1>
+          <p>账号和密码只保存在这台电脑的 `config.local.json`，不会提交到 GitHub。</p>
+        </div>
+        <a class="secondary-button" href="/">回到状态屏</a>
+      </header>
+
+      <section id="setupNotice" class="notice-panel">
+        <strong>三步完成</strong>
+        <span>填宿舍账号和密码，保存配置，点击采集一次。以后双击启动文件即可打开状态屏。</span>
+      </section>
+
+      <form id="configForm" class="config-grid">
+        <section class="config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>基础信息</h2>
+              <p>状态屏显示和学校平台登录</p>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>学校名称</span>
+            <input id="schoolNameInput" name="schoolName" autocomplete="organization" />
+          </label>
+
+          <label class="field">
+            <span>状态屏名称</span>
+            <input id="displayNameInput" name="displayName" placeholder="例如 1栋101" />
+          </label>
+
+          <label class="field">
+            <span>宿舍用电账号</span>
+            <input id="loginUserCodeInput" name="loginUserCode" autocomplete="username" placeholder="填写服务号里的缴费账号" />
+            <small id="loginUserCodeHint">如果已经保存过，留空表示不修改。</small>
+          </label>
+
+          <label class="field">
+            <span>查询密码</span>
+            <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="填写查询密码" />
+            <small id="passwordHint">如果已经保存过，留空表示不修改。</small>
+          </label>
+
+          <label class="field">
+            <span>指定客户编号，可不填</span>
+            <input id="customerUserCodeInput" name="customerUserCode" placeholder="账号绑定多个用电户时再填写" />
+          </label>
+        </section>
+
+        <section class="config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>刷新和预警</h2>
+              <p>学校每天约 12:00 结算昨天用电量</p>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>每日采集时间</span>
+            <input id="dailyRefreshTimeInput" name="dailyRefreshTime" type="time" />
+          </label>
+
+          <div class="field-row">
+            <label class="field">
+              <span>余额低于多少元提醒</span>
+              <input id="lowBalanceInput" name="lowBalance" type="number" min="0" step="1" />
+            </label>
+            <label class="field">
+              <span>预计少于多少天提醒</span>
+              <input id="criticalDaysInput" name="criticalDays" type="number" min="1" step="1" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>结算说明</span>
+            <input id="schoolRefreshNoteInput" name="schoolRefreshNote" />
+          </label>
+
+          <details class="advanced">
+            <summary>高级设置</summary>
+            <div class="field-row">
+              <label class="field">
+                <span>网页端口</span>
+                <input id="portInput" name="port" type="number" min="1024" max="65535" />
+              </label>
+              <label class="field">
+                <span>局域网访问</span>
+                <select id="bindHostInput" name="bindHost">
+                  <option value="0.0.0.0">允许同一局域网访问</option>
+                  <option value="127.0.0.1">只允许本机访问</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>失败重试间隔，分钟</span>
+                <input id="retryMinutesInput" name="retryMinutes" type="number" min="5" step="5" />
+              </label>
+              <label class="field">
+                <span>保留历史快照数量</span>
+                <input id="historyLimitInput" name="historyLimit" type="number" min="30" step="10" />
+              </label>
+            </div>
+          </details>
+        </section>
+
+        <section class="config-actions">
+          <div id="formStatus" class="form-status">等待配置</div>
+          <div class="action-row">
+            <button id="saveBtn" class="primary-button" type="submit">保存配置</button>
+            <button id="testBtn" class="secondary-button" type="button">采集一次</button>
+            <a class="secondary-button" href="/">打开状态屏</a>
+          </div>
+        </section>
+      </form>
+    </main>
+
+    <script src="/setup.js" type="module"></script>
+  </body>
+</html>

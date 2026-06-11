@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchSnapshot } from "./energyClient.js";
@@ -8,6 +8,8 @@ import { JsonStore } from "./store.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const publicRoot = path.join(projectRoot, "public");
+const localConfigPath = path.join(projectRoot, "config.local.json");
+const exampleConfigPath = path.join(projectRoot, "config.example.json");
 
 function contentType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
@@ -24,15 +26,78 @@ function contentType(filePath) {
   );
 }
 
-async function loadConfig() {
-  const localPath = path.join(projectRoot, "config.local.json");
-  const examplePath = path.join(projectRoot, "config.example.json");
-  let config;
+async function readJson(filePath, fallback = null) {
   try {
-    config = JSON.parse(await readFile(localPath, "utf8"));
+    return JSON.parse(await readFile(filePath, "utf8"));
   } catch {
-    config = JSON.parse(await readFile(examplePath, "utf8"));
+    return fallback;
   }
+}
+
+function cleanString(value, fallback = "") {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function numberInRange(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function isPlaceholder(value) {
+  return /填写|fill-|your-|example/i.test(String(value ?? ""));
+}
+
+function hasUsableCredentials(config) {
+  return Boolean(
+    cleanString(config.loginUserCode) &&
+      cleanString(config.password) &&
+      !isPlaceholder(config.loginUserCode) &&
+      !isPlaceholder(config.password),
+  );
+}
+
+function normalizeConfig(input, previous = {}) {
+  const alerts = {
+    ...(previous.alerts ?? {}),
+    ...(input.alerts ?? {}),
+  };
+  const loginUserCode = cleanString(input.loginUserCode, previous.loginUserCode);
+  const password = cleanString(input.password, previous.password);
+
+  return {
+    schoolName: cleanString(input.schoolName, previous.schoolName || "广西智能制造职业技术学院"),
+    loginUserCode,
+    password,
+    displayName: cleanString(input.displayName, previous.displayName || "宿舍用电状态屏"),
+    customerUserCode: cleanString(input.customerUserCode, previous.customerUserCode || ""),
+    port: numberInRange(input.port, Number(previous.port || 8787), 1024, 65535),
+    bindHost: cleanString(input.bindHost, previous.bindHost || "0.0.0.0"),
+    schoolRefreshNote: cleanString(
+      input.schoolRefreshNote,
+      previous.schoolRefreshNote || "学校每天约 12:00 结算并刷新昨天用电量",
+    ),
+    refreshMode: input.refreshMode === "interval" ? "interval" : "daily",
+    dailyRefreshTime: /^\d{1,2}:\d{2}$/.test(String(input.dailyRefreshTime ?? ""))
+      ? String(input.dailyRefreshTime)
+      : previous.dailyRefreshTime || "12:10",
+    refreshMinutes: numberInRange(input.refreshMinutes, Number(previous.refreshMinutes || 30), 5, 1440),
+    retryMinutes: numberInRange(input.retryMinutes, Number(previous.retryMinutes || 30), 5, 1440),
+    historyLimit: numberInRange(input.historyLimit, Number(previous.historyLimit || 420), 30, 2000),
+    alerts: {
+      lowBalance: numberInRange(alerts.lowBalance, 20, 0, 10000),
+      criticalDays: numberInRange(alerts.criticalDays, 3, 1, 365),
+      highUsageRatio: numberInRange(alerts.highUsageRatio, 1.5, 1, 10),
+      staleHours: numberInRange(alerts.staleHours, 30, 1, 720),
+    },
+  };
+}
+
+async function loadConfig() {
+  const example = await readJson(exampleConfigPath, {});
+  const local = await readJson(localConfigPath, {});
+  const config = normalizeConfig({ ...example, ...local }, {});
 
   return {
     ...config,
@@ -41,6 +106,43 @@ async function loadConfig() {
     port: Number(process.env.PORT || config.port || 8787),
     bindHost: process.env.BIND_HOST || config.bindHost || "0.0.0.0",
   };
+}
+
+async function saveLocalConfig(nextConfig) {
+  await mkdir(projectRoot, { recursive: true });
+  await writeFile(localConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+}
+
+function safeConfig(config) {
+  return {
+    schoolName: config.schoolName,
+    displayName: config.displayName,
+    customerUserCode: config.customerUserCode,
+    port: config.port,
+    bindHost: config.bindHost,
+    schoolRefreshNote: config.schoolRefreshNote,
+    refreshMode: config.refreshMode,
+    dailyRefreshTime: config.dailyRefreshTime,
+    refreshMinutes: config.refreshMinutes,
+    retryMinutes: config.retryMinutes,
+    historyLimit: config.historyLimit,
+    alerts: config.alerts,
+    configured: hasUsableCredentials(config),
+    hasLoginUserCode: Boolean(cleanString(config.loginUserCode) && !isPlaceholder(config.loginUserCode)),
+    hasPassword: Boolean(cleanString(config.password) && !isPlaceholder(config.password)),
+  };
+}
+
+async function readRequestJson(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1024 * 1024) throw new Error("请求内容太大");
+    chunks.push(chunk);
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text ? JSON.parse(text) : {};
 }
 
 function sendJson(res, status, payload) {
@@ -64,7 +166,8 @@ function isPathInside(parent, target) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, "http://localhost");
-  const requested = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  const pathname = url.pathname === "/setup" ? "/setup.html" : url.pathname;
+  const requested = decodeURIComponent(pathname === "/" ? "/index.html" : pathname);
   const target = path.join(publicRoot, requested);
   if (!isPathInside(publicRoot, target)) {
     sendText(res, 403, "Forbidden");
@@ -75,7 +178,7 @@ async function serveStatic(req, res) {
     const bytes = await readFile(target);
     res.writeHead(200, {
       "content-type": contentType(target),
-      "cache-control": target.endsWith("index.html") ? "no-store" : "public, max-age=60",
+      "cache-control": target.endsWith(".html") ? "no-store" : "public, max-age=60",
     });
     res.end(bytes);
   } catch {
@@ -101,6 +204,7 @@ function dailyCutoff(now, dailyRefreshTime) {
 }
 
 function shouldRunRefresh(lastSnapshot, config) {
+  if (!hasUsableCredentials(config)) return false;
   if (!lastSnapshot?.fetchedAt) return true;
   const mode = config.refreshMode || "daily";
   if (mode === "daily") {
@@ -122,13 +226,16 @@ function applyConfigLabels(snapshot, config) {
 }
 
 async function main() {
-  const config = await loadConfig();
+  let config = await loadConfig();
   const store = new JsonStore(path.join(projectRoot, "data"), Number(config.historyLimit || 420));
   let refreshing = null;
   let lastError = null;
   let lastRefreshAttemptAt = 0;
 
   async function refresh(reason = "manual") {
+    if (!hasUsableCredentials(config)) {
+      throw new Error("配置未完成，请先打开网页配置账号和密码");
+    }
     if (refreshing) return refreshing;
     refreshing = (async () => {
       try {
@@ -166,11 +273,11 @@ async function main() {
     });
   }
 
-  const retryMinutes = Math.max(5, Number(config.retryMinutes || config.refreshMinutes || 30));
+  const retryMinutes = () => Math.max(5, Number(config.retryMinutes || config.refreshMinutes || 30));
   setInterval(async () => {
     const latest = await store.latest();
     if (!shouldRunRefresh(latest, config)) return;
-    if (Date.now() - lastRefreshAttemptAt < retryMinutes * 60 * 1000) return;
+    if (Date.now() - lastRefreshAttemptAt < retryMinutes() * 60 * 1000) return;
     refresh("interval").catch((error) => {
       console.error(`[interval refresh failed] ${error.message}`);
     });
@@ -180,13 +287,45 @@ async function main() {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
     try {
+      if (url.pathname === "/api/config" && req.method === "GET") {
+        sendJson(res, 200, { ok: true, data: safeConfig(config) });
+        return;
+      }
+
+      if (url.pathname === "/api/config" && req.method === "POST") {
+        const body = await readRequestJson(req);
+        const previous = config;
+        const nextInput = { ...body };
+        if (!cleanString(nextInput.loginUserCode) && previous.loginUserCode) {
+          nextInput.loginUserCode = previous.loginUserCode;
+        }
+        if (!cleanString(nextInput.password) && previous.password) {
+          nextInput.password = previous.password;
+        }
+        const nextConfig = normalizeConfig(nextInput, previous);
+        await saveLocalConfig(nextConfig);
+        config = await loadConfig();
+        store.historyLimit = Number(config.historyLimit || 420);
+        lastError = null;
+
+        sendJson(res, 200, {
+          ok: true,
+          data: safeConfig(config),
+          needsRestart: previous.port !== config.port || previous.bindHost !== config.bindHost,
+        });
+        return;
+      }
+
       if (url.pathname === "/api/snapshot" && req.method === "GET") {
         const latest = await store.latest();
         if (!latest) {
-          sendJson(res, 503, {
+          sendJson(res, hasUsableCredentials(config) ? 503 : 428, {
             ok: false,
             refreshing: Boolean(refreshing),
-            error: lastError ?? { message: "No snapshot yet" },
+            setupRequired: !hasUsableCredentials(config),
+            error: lastError ?? {
+              message: hasUsableCredentials(config) ? "No snapshot yet" : "配置未完成，请先完成网页配置",
+            },
           });
           return;
         }
@@ -203,7 +342,7 @@ async function main() {
 
       if (url.pathname === "/api/refresh" && req.method === "POST") {
         const snapshot = await refresh("manual");
-        sendJson(res, 200, { ok: true, data: snapshot });
+        sendJson(res, 200, { ok: true, data: applyConfigLabels(snapshot, config) });
         return;
       }
 
@@ -211,12 +350,13 @@ async function main() {
         const latest = await store.latest();
         sendJson(res, 200, {
           ok: true,
+          configured: hasUsableCredentials(config),
           refreshing: Boolean(refreshing),
           fetchedAt: latest?.fetchedAt ?? null,
           lastError,
           refreshMode: config.refreshMode || "daily",
           dailyRefreshTime: config.dailyRefreshTime || null,
-          retryMinutes,
+          retryMinutes: retryMinutes(),
         });
         return;
       }
@@ -233,7 +373,8 @@ async function main() {
   });
 
   server.listen(config.port, config.bindHost, () => {
-    console.log(`Dorm electricity dashboard: http://localhost:${config.port}`);
+    console.log(`GXZN electricity dashboard: http://localhost:${config.port}`);
+    console.log(`Open setup page: http://localhost:${config.port}/setup.html`);
     if ((config.refreshMode || "daily") === "daily") {
       console.log(`Listening on ${config.bindHost}:${config.port}, daily refresh after ${config.dailyRefreshTime || "12:10"}`);
     } else {
