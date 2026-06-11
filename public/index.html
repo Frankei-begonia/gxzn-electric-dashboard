@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>电费量化状态屏</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="screen">
+      <header class="topbar">
+        <div>
+          <div id="schoolName" class="eyebrow">广西智能制造职业技术学院电费量化平台</div>
+          <h1 id="displayName">加载中</h1>
+        </div>
+        <div class="topbar-meta">
+          <div id="clock" class="clock">--:--:--</div>
+          <div id="updatedAt" class="updated">等待数据采集</div>
+        </div>
+      </header>
+
+      <section id="alertStrip" class="alert-strip"></section>
+
+      <section class="metrics">
+        <article class="metric primary">
+          <span>当前余额</span>
+          <strong id="balance">--</strong>
+          <small id="expireDate">预计到期 --</small>
+        </article>
+        <article class="metric">
+          <span>预计可用</span>
+          <strong id="daysRemaining">--</strong>
+          <small id="dailyAvgCost">按近期均值估算</small>
+        </article>
+        <article class="metric">
+          <span>最新结算日</span>
+          <strong id="latestKwh">--</strong>
+          <small id="latestCost">--</small>
+        </article>
+        <article class="metric">
+          <span>本月消费</span>
+          <strong id="monthCost">--</strong>
+          <small id="monthKwh">--</small>
+        </article>
+      </section>
+
+      <section class="layout">
+        <section class="panel chart-panel">
+          <div class="panel-head">
+            <div>
+              <h2>每日结算趋势</h2>
+              <p id="trendCaption">最近统计区间</p>
+            </div>
+            <button id="refreshBtn" class="icon-button" type="button" title="立即刷新">刷新</button>
+          </div>
+          <div id="trendChart" class="chart"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>结算说明</h2>
+              <p>非实时电表读数</p>
+            </div>
+          </div>
+          <div id="settlementInfo" class="settlement-info"></div>
+        </section>
+      </section>
+
+      <section class="layout lower">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>回路明细</h2>
+              <p id="roomCaption">多回路汇总</p>
+            </div>
+          </div>
+          <div id="rooms" class="rooms"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>最近记录</h2>
+              <p>学校每日结算数据</p>
+            </div>
+          </div>
+          <div id="recentTable" class="recent-table"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

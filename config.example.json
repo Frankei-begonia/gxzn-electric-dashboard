@@ -1,0 +1,20 @@
+{
+  "schoolName": "广西智能制造职业技术学院",
+  "loginUserCode": "填写你的宿舍缴费账号",
+  "password": "填写你的查询密码",
+  "displayName": "宿舍名称，例如 1栋101",
+  "customerUserCode": "",
+  "port": 8787,
+  "bindHost": "0.0.0.0",
+  "schoolRefreshNote": "学校每天约 12:00 结算并刷新昨天用电量",
+  "refreshMode": "daily",
+  "dailyRefreshTime": "12:10",
+  "retryMinutes": 30,
+  "historyLimit": 420,
+  "alerts": {
+    "lowBalance": 20,
+    "criticalDays": 3,
+    "highUsageRatio": 1.5,
+    "staleHours": 30
+  }
+}

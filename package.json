@@ -1,0 +1,14 @@
+{
+  "name": "gxzn-electric-dashboard",
+  "version": "1.0.0",
+  "description": "广西智能制造职业技术学院宿舍电费量化状态屏",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/server.js",
+    "refresh": "node src/server.js --refresh-once"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
