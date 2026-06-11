@@ -150,7 +150,7 @@ function renderRecent(rows = []) {
   const max = Math.max(...rows.map((item) => item.kwh), 1);
   $("recentTable").innerHTML = rows.length
     ? rows
-        .slice(-4)
+        .slice(-3)
         .reverse()
         .map((item) => {
           const pct = Math.max(2, (item.kwh / max) * 100);
