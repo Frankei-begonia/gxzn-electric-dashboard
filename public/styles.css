@@ -596,7 +596,7 @@ summary {
 }
 
 @media (max-width: 980px) {
-  body {
+  body.dashboard-body {
     overflow: auto;
   }
 
