@@ -2,6 +2,12 @@ const $ = (id) => document.getElementById(id);
 const yuan = (value) => `${format(value)} 元`;
 const kwh = (value) => `${format(value)} 度`;
 
+function confidenceLabel(value) {
+  if (value === "high") return "可信度高";
+  if (value === "medium") return "可信度中";
+  return "可信度低";
+}
+
 function format(value, digits = 2) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "--";
@@ -103,12 +109,21 @@ function renderTrendChart(daily = []) {
 
 function renderSettlementInfo(snapshot) {
   const latest = snapshot.totals?.latestDay;
+  const forecast = snapshot.totals?.forecast;
   const fetchedAt = snapshot.fetchedAt ? new Date(snapshot.fetchedAt).toLocaleString("zh-CN", { hour12: false }) : "--";
   const latestText = latest ? `${latest.label}，统计区间 ${latest.from || "--"} 到 ${latest.to || "--"}` : "--";
+  const forecastText = forecast
+    ? `${forecast.trendText || "近期趋势平稳"}，动态日耗约 ${yuan(forecast.dailyCost)}，${forecast.confidenceText || "预测仅作提醒"}。`
+    : "等待历史数据积累后自动预测。";
+  const lowBalanceText = forecast?.lowBalanceDate ? `预计 ${forecast.lowBalanceDate} 附近低于余额预警线。` : "暂未预测到低余额日期。";
   $("settlementInfo").innerHTML = `
     <div class="settlement-item">
       <strong>数据含义</strong>
       <span>学校系统每天约 12:00 结算并刷新昨天用电量；这里显示的是结算后的历史数据，不是实时功率。</span>
+    </div>
+    <div class="settlement-item">
+      <strong>续航预测</strong>
+      <span>${forecastText}${lowBalanceText}</span>
     </div>
     <div class="settlement-item">
       <strong>最新结算日</strong>
@@ -176,7 +191,9 @@ function render(snapshot) {
   $("expireDate").textContent = `系统预计到期 ${snapshot.account?.expectedExpireDate || "--"}`;
   $("daysRemaining").textContent =
     snapshot.totals?.daysRemaining === null ? "--" : `${format(snapshot.totals?.daysRemaining, 1)} 天`;
-  $("dailyAvgCost").textContent = `日均 ${yuan(snapshot.totals?.dailyAvgCost)}`;
+  $("dailyAvgCost").textContent = snapshot.totals?.forecast
+    ? `动态日耗 ${yuan(snapshot.totals.forecast.dailyCost)} · ${confidenceLabel(snapshot.totals.forecast.confidence)}`
+    : `日均 ${yuan(snapshot.totals?.dailyAvgCost)}`;
   $("latestKwh").textContent = kwh(snapshot.totals?.latestDay?.kwh);
   $("latestCost").textContent = snapshot.totals?.latestDay
     ? `结算日 ${snapshot.totals.latestDay.label} / ${yuan(snapshot.totals.latestDay.cost)}`

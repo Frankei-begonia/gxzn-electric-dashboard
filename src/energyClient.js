@@ -32,6 +32,10 @@ function round(value, digits = 2) {
   return Math.round((n + Number.EPSILON) * factor) / factor;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -200,6 +204,189 @@ function aggregateSegments(roomSnapshots) {
     .map((item) => ({ ...item, kwh: round(item.kwh), cost: round(item.cost) }));
 }
 
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function robustRows(daily) {
+  const rows = daily
+    .filter((item) => Number(item.cost) > 0 && Number(item.kwh) > 0)
+    .map((item, index) => ({
+      ...item,
+      index,
+      cost: Number(item.cost),
+      kwh: Number(item.kwh),
+    }));
+  if (!rows.length) return [];
+
+  const costs = rows.map((item) => item.cost);
+  const center = median(costs);
+  const deviations = costs.map((value) => Math.abs(value - center));
+  const mad = median(deviations) || center * 0.15 || 1;
+  const low = Math.max(0.01, center - mad * 3);
+  const high = center + mad * 3;
+
+  return rows.map((item) => ({
+    ...item,
+    adjustedCost: clamp(item.cost, low, high),
+    adjustedKwh: item.kwh,
+  }));
+}
+
+function weightedMean(rows, key) {
+  const n = rows.length;
+  if (!n) return 0;
+  const halfLife = clamp(Math.sqrt(n) * 1.8, 2, Math.max(2, n / 2));
+  let weightSum = 0;
+  let valueSum = 0;
+  rows.forEach((row, index) => {
+    const age = n - 1 - index;
+    const weight = 0.5 ** (age / halfLife);
+    weightSum += weight;
+    valueSum += row[key] * weight;
+  });
+  return valueSum / Math.max(weightSum, 1);
+}
+
+function weightedTrend(rows, key) {
+  const n = rows.length;
+  if (n < 4) return { slope: 0, r2: 0 };
+  let weightSum = 0;
+  let xSum = 0;
+  let ySum = 0;
+  rows.forEach((row, index) => {
+    const weight = 1 + index / n;
+    weightSum += weight;
+    xSum += index * weight;
+    ySum += row[key] * weight;
+  });
+  const xMean = xSum / weightSum;
+  const yMean = ySum / weightSum;
+  let numerator = 0;
+  let denominator = 0;
+  let total = 0;
+  rows.forEach((row, index) => {
+    const weight = 1 + index / n;
+    numerator += weight * (index - xMean) * (row[key] - yMean);
+    denominator += weight * (index - xMean) ** 2;
+    total += weight * (row[key] - yMean) ** 2;
+  });
+  const slope = denominator ? numerator / denominator : 0;
+  const residual = rows.reduce((sum, row, index) => {
+    const predicted = yMean + slope * (index - xMean);
+    const weight = 1 + index / n;
+    return sum + weight * (row[key] - predicted) ** 2;
+  }, 0);
+  const r2 = total ? clamp(1 - residual / total, 0, 1) : 0;
+  return { slope, r2 };
+}
+
+function weekdayFactors(rows) {
+  const overall = median(rows.map((item) => item.adjustedCost)) || 1;
+  const byWeekday = new Map();
+  for (const row of rows) {
+    const date = new Date(`${row.date || row.to || row.label}T12:00:00+08:00`);
+    if (Number.isNaN(date.getTime())) continue;
+    const weekday = date.getDay();
+    const list = byWeekday.get(weekday) ?? [];
+    list.push(row.adjustedCost);
+    byWeekday.set(weekday, list);
+  }
+
+  const factors = new Map();
+  for (const [weekday, values] of byWeekday.entries()) {
+    if (values.length >= 2) {
+      factors.set(weekday, clamp(median(values) / overall, 0.75, 1.25));
+    }
+  }
+  return factors;
+}
+
+function buildBalanceForecast(account, daily, config) {
+  const balance = Number(account.balance ?? 0);
+  const rows = robustRows(daily);
+  if (!Number.isFinite(balance) || balance <= 0 || !rows.length) {
+    return {
+      daysRemaining: balance <= 0 ? 0 : null,
+      forecastExpireDate: balance <= 0 ? new Date().toISOString().slice(0, 10) : null,
+      dailyCost: 0,
+      dailyKwh: 0,
+      confidence: "low",
+      confidenceText: rows.length ? "余额已低于或等于 0" : "历史数据不足，暂时无法预测",
+      sampleDays: rows.length,
+      trend: "flat",
+      lowBalanceDate: null,
+    };
+  }
+
+  const baseCost = weightedMean(rows, "adjustedCost");
+  const baseKwh = weightedMean(rows, "adjustedKwh");
+  const trend = weightedTrend(rows, "adjustedCost");
+  const trendImpact = baseCost > 0 ? clamp((trend.slope / baseCost) * trend.r2, -0.25, 0.3) : 0;
+  const adjustedBaseCost = Math.max(0.01, baseCost * (1 + trendImpact));
+  const factors = weekdayFactors(rows);
+  const costs = rows.map((item) => item.adjustedCost);
+  const costMedian = median(costs) || adjustedBaseCost;
+  const deviations = costs.map((value) => Math.abs(value - costMedian));
+  const volatility = costMedian ? median(deviations) / costMedian : 1;
+  const lowBalance = Number(config.alerts?.lowBalance ?? account.minimumAmount ?? 20);
+
+  let remaining = balance;
+  let lowBalanceDate = null;
+  let daysRemaining = null;
+  const today = new Date();
+  const maxProjectionDays = 730;
+  for (let day = 1; day <= maxProjectionDays; day += 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + day);
+    const weekdayFactor = factors.get(date.getDay()) ?? 1;
+    const trendFactor = clamp(1 + trend.slope * day / Math.max(adjustedBaseCost, 1) * 0.35, 0.65, 1.45);
+    const predictedCost = Math.max(0.01, adjustedBaseCost * weekdayFactor * trendFactor);
+    remaining -= predictedCost;
+    if (!lowBalanceDate && remaining <= lowBalance) {
+      lowBalanceDate = date.toISOString().slice(0, 10);
+    }
+    if (remaining <= 0) {
+      daysRemaining = day;
+      break;
+    }
+  }
+
+  const confidence =
+    rows.length >= 14 && volatility < 0.35 ? "high" : rows.length >= 7 && volatility < 0.55 ? "medium" : "low";
+  const confidenceText =
+    confidence === "high"
+      ? "历史样本较稳定，预测可信度较高"
+      : confidence === "medium"
+        ? "历史样本可用，预测可信度中等"
+        : "历史样本偏少或波动较大，预测仅作提醒";
+  const trendLabel = trendImpact > 0.06 ? "rising" : trendImpact < -0.06 ? "falling" : "flat";
+
+  return {
+    daysRemaining: daysRemaining === null ? null : round(daysRemaining, 1),
+    forecastExpireDate:
+      daysRemaining === null
+        ? null
+        : (() => {
+            const date = new Date(today);
+            date.setDate(today.getDate() + Math.floor(daysRemaining));
+            return date.toISOString().slice(0, 10);
+          })(),
+    dailyCost: round(adjustedBaseCost),
+    dailyKwh: round(baseKwh),
+    confidence,
+    confidenceText,
+    sampleDays: rows.length,
+    volatility: round(volatility, 2),
+    trend: trendLabel,
+    trendText: trendLabel === "rising" ? "近期消耗上升" : trendLabel === "falling" ? "近期消耗下降" : "近期消耗平稳",
+    lowBalanceDate,
+  };
+}
+
 function computeAlerts(account, daily, config) {
   const alertConfig = config.alerts ?? {};
   const balance = Number(account.balance ?? 0);
@@ -208,6 +395,7 @@ function computeAlerts(account, daily, config) {
   const highUsageRatio = Number(alertConfig.highUsageRatio ?? 1.5);
   const staleHours = Number(alertConfig.staleHours ?? 30);
   const alerts = [];
+  const forecast = buildBalanceForecast(account, daily, config);
   const recent = daily.slice(-7);
   const latest = recent.at(-1);
   const previous = recent.slice(0, -1);
@@ -217,7 +405,7 @@ function computeAlerts(account, daily, config) {
   const dailyAvgKwh = previous.length
     ? previous.reduce((sum, item) => sum + item.kwh, 0) / previous.length
     : recent.reduce((sum, item) => sum + item.kwh, 0) / Math.max(recent.length, 1);
-  const daysRemaining = dailyAvgCost > 0 ? balance / dailyAvgCost : null;
+  const daysRemaining = forecast.daysRemaining;
 
   if (balance <= 0) {
     alerts.push({
@@ -237,7 +425,7 @@ function computeAlerts(account, daily, config) {
     alerts.push({
       level: "warning",
       title: "预计可用天数偏低",
-      detail: `按最近日均 ${round(dailyAvgCost)} 元估算，余额约可用 ${round(daysRemaining, 1)} 天。`,
+      detail: `动态预测日耗 ${round(forecast.dailyCost)} 元，余额约可用 ${round(daysRemaining, 1)} 天。`,
     });
   }
 
@@ -265,7 +453,7 @@ function computeAlerts(account, daily, config) {
     alerts.push({
       level: "ok",
       title: "状态正常",
-      detail: "余额和近期用电趋势均未触发预警。",
+      detail: `余额和近期用电趋势均未触发预警，${forecast.confidenceText}。`,
     });
   }
 
@@ -274,14 +462,8 @@ function computeAlerts(account, daily, config) {
     dailyAvgCost: round(dailyAvgCost),
     dailyAvgKwh: round(dailyAvgKwh),
     daysRemaining: daysRemaining === null ? null : round(daysRemaining, 1),
+    forecast,
   };
-}
-
-function forecastDate(daysRemaining) {
-  if (!Number.isFinite(daysRemaining)) return null;
-  const date = new Date();
-  date.setDate(date.getDate() + Math.floor(daysRemaining));
-  return date.toISOString().slice(0, 10);
 }
 
 async function fetchRoomSnapshot(token, userCode, room, typeId) {
@@ -407,7 +589,8 @@ export async function fetchSnapshot(config) {
     dailyAvgKwh: computed.dailyAvgKwh,
     dailyAvgCost: computed.dailyAvgCost,
     daysRemaining: computed.daysRemaining,
-    forecastExpireDate: forecastDate(computed.daysRemaining),
+    forecastExpireDate: computed.forecast.forecastExpireDate,
+    forecast: computed.forecast,
   };
 
   return {

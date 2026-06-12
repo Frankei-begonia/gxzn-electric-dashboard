@@ -1,3 +1,7 @@
+param(
+  [switch]$NoPause
+)
+
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -21,11 +25,13 @@ function Read-Port {
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Host ""
-  Write-Host "没有检测到 Node.js。" -ForegroundColor Yellow
-  Write-Host "请安装 Node.js 18 或更高版本，然后重新双击启动文件。"
-  Write-Host "官方下载地址：https://nodejs.org/zh-cn/download"
+  Write-Host "Node.js was not found." -ForegroundColor Yellow
+  Write-Host "Please install Node.js 18 or newer, then run this launcher again."
+  Write-Host "Download: https://nodejs.org/zh-cn/download"
   Start-Process "https://nodejs.org/zh-cn/download"
-  Read-Host "安装完成后按回车关闭窗口"
+  if (-not $NoPause) {
+    Read-Host "Press Enter to close this window after installation"
+  }
   exit 1
 }
 
@@ -35,9 +41,11 @@ $Url = "http://localhost:$Port"
 try {
   $health = Invoke-RestMethod -Uri "$Url/api/health" -TimeoutSec 1
   if ($health.ok) {
-    Write-Host "电费状态屏已经在运行，正在打开网页：$Url" -ForegroundColor Green
+    Write-Host "Dashboard is already running. Opening $Url" -ForegroundColor Green
     Start-Process $Url
-    Read-Host "按回车关闭这个窗口"
+    if (-not $NoPause) {
+      Read-Host "Press Enter to close this window"
+    }
     exit 0
   }
 } catch {
@@ -49,13 +57,13 @@ Start-Job -ScriptBlock {
   Start-Process $OpenUrl
 } -ArgumentList $Url | Out-Null
 
-Write-Host "正在启动电费状态屏：$Url" -ForegroundColor Green
-Write-Host "首次使用会进入配置页；配置完成后可以打开状态屏。"
-Write-Host "这个窗口不要关闭，关闭后网页服务也会停止。"
+Write-Host "Starting electricity dashboard: $Url" -ForegroundColor Green
+Write-Host "First run opens the setup page. After setup, open the dashboard page."
+Write-Host "Keep this window open. Closing it stops the local web service."
 Write-Host ""
 
 node src/server.js
 
-if ($LASTEXITCODE -ne 0) {
-  Read-Host "服务已停止，按回车关闭窗口"
+if ($LASTEXITCODE -ne 0 -and -not $NoPause) {
+  Read-Host "Service stopped. Press Enter to close this window"
 }
