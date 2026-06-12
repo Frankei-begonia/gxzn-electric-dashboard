@@ -45,6 +45,21 @@ function renderAlerts(alerts = []) {
     .join("");
 }
 
+function renderFailureAlert(lastError) {
+  if (!lastError?.message) return null;
+  const time = lastError.time ? new Date(lastError.time).toLocaleString("zh-CN", { hour12: false }) : "未知时间";
+  return {
+    level: "warning",
+    title: "最近一次采集失败",
+    detail: `${time}：${lastError.message}`,
+  };
+}
+
+function payloadErrorMessage(payload, fallback) {
+  if (typeof payload?.error === "string") return payload.error;
+  return payload?.error?.message || fallback;
+}
+
 function renderTrendChart(daily = []) {
   const target = $("trendChart");
   const rows = daily.slice(-18);
@@ -182,7 +197,7 @@ function renderRecent(rows = []) {
     : '<div class="empty-state">暂无最近记录</div>';
 }
 
-function render(snapshot) {
+function render(snapshot, lastError = null) {
   $("setupBanner").classList.add("hidden");
   $("schoolName").textContent = snapshot.schoolName ? `${snapshot.schoolName}电费量化平台` : "电费量化平台";
   $("displayName").textContent = snapshot.displayName || snapshot.account?.userName || "宿舍用电";
@@ -202,7 +217,7 @@ function render(snapshot) {
   $("monthKwh").textContent = kwh(snapshot.totals?.monthKwh);
   $("trendCaption").textContent = snapshot.schoolRefreshNote || "学校每天约 12:00 结算并刷新昨天用电量";
 
-  renderAlerts(snapshot.alerts);
+  renderAlerts([renderFailureAlert(lastError), ...(snapshot.alerts ?? [])].filter(Boolean));
   renderTrendChart(snapshot.daily);
   renderSettlementInfo(snapshot);
   renderRooms(snapshot.rooms);
@@ -225,12 +240,12 @@ async function loadSnapshot() {
   const payload = await response.json();
   if (!payload.ok) {
     if (payload.setupRequired) {
-      renderSetupRequired(payload.error?.message);
+      renderSetupRequired(payloadErrorMessage(payload, "请先完成网页配置"));
       return;
     }
-    throw new Error(payload.error?.message || "暂无采集数据");
+    throw new Error(payloadErrorMessage(payload, "暂无采集数据"));
   }
-  render(payload.data);
+  render(payload.data, payload.lastError);
   $("refreshBtn").disabled = Boolean(payload.refreshing);
   $("refreshBtn").textContent = payload.refreshing ? "采集中" : "刷新";
 }
@@ -243,7 +258,7 @@ async function refreshNow() {
     const response = await fetch("/api/refresh", { method: "POST" });
     const payload = await response.json();
     if (!payload.ok) throw new Error(payload.error || "刷新失败");
-    render(payload.data);
+    render(payload.data, null);
   } catch (error) {
     renderAlerts([{ level: "warning", title: "刷新失败", detail: error.message }]);
   } finally {

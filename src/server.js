@@ -58,6 +58,26 @@ function hasUsableCredentials(config) {
   );
 }
 
+function publicErrorMessage(error) {
+  const message = String(error?.message ?? error ?? "");
+  if (/loginByApp|user_pwd|password|pwd|密码|账号|用户|登录|token/i.test(message)) {
+    return "学校平台登录失败：请检查宿舍用电账号和查询密码是否正确。";
+  }
+  if (/no bound electricity accounts|indexQuery returned no bound/i.test(message)) {
+    return "登录成功，但没有查到绑定的用电户；请确认这个账号已在微信服务号绑定宿舍用电。";
+  }
+  if (/getRoom|room/i.test(message)) {
+    return "学校平台没有返回宿舍房间信息；请确认账号是否绑定了宿舍用电。";
+  }
+  if (/AbortError|aborted|fetch failed|ENOTFOUND|ECONN|ETIMEDOUT|timeout|HTTP 5/i.test(message)) {
+    return "连接学校电费平台失败：可能是网络不通或学校平台暂时不可用，请稍后再试。";
+  }
+  if (/SOAP|non-JSON|HTTP|Unexpected token/i.test(message)) {
+    return "学校电费平台返回异常：可能正在维护或接口发生变化，请稍后再试。";
+  }
+  return message || "采集失败，请检查配置后重试。";
+}
+
 function normalizeConfig(input, previous = {}) {
   const alerts = {
     ...(previous.alerts ?? {}),
@@ -246,13 +266,14 @@ async function main() {
         lastError = null;
         return snapshot;
       } catch (error) {
+        const message = publicErrorMessage(error);
         lastError = {
-          message: error.message,
+          message,
           time: new Date().toISOString(),
           reason,
         };
-        await store.saveError(error, { reason });
-        throw error;
+        await store.saveError(error, { reason, publicMessage: message });
+        throw new Error(message);
       } finally {
         refreshing = null;
       }
@@ -368,7 +389,7 @@ async function main() {
 
       sendText(res, 405, "Method not allowed");
     } catch (error) {
-      sendJson(res, 500, { ok: false, error: error.message });
+      sendJson(res, 500, { ok: false, error: publicErrorMessage(error) });
     }
   });
 
