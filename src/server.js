@@ -58,6 +58,16 @@ function hasUsableCredentials(config) {
   );
 }
 
+function maskSecret(value) {
+  const text = cleanString(value);
+  if (!text || isPlaceholder(text)) return "";
+  if (text.length <= 4) return "*".repeat(text.length);
+  if (text.length <= 8) {
+    return `${text.slice(0, 2)}${"*".repeat(text.length - 4)}${text.slice(-2)}`;
+  }
+  return `${text.slice(0, 4)}${"*".repeat(Math.max(4, Math.min(8, text.length - 8)))}${text.slice(-4)}`;
+}
+
 function publicErrorMessage(error) {
   const message = String(error?.message ?? error ?? "");
   if (/loginByApp|user_pwd|password|pwd|密码|账号|用户|登录|token/i.test(message)) {
@@ -149,6 +159,7 @@ function safeConfig(config) {
     alerts: config.alerts,
     configured: hasUsableCredentials(config),
     hasLoginUserCode: Boolean(cleanString(config.loginUserCode) && !isPlaceholder(config.loginUserCode)),
+    maskedLoginUserCode: maskSecret(config.loginUserCode),
     hasPassword: Boolean(cleanString(config.password) && !isPlaceholder(config.password)),
   };
 }

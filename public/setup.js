@@ -23,8 +23,18 @@ function fill(config) {
   $("lowBalanceInput").value = config.alerts?.lowBalance ?? 20;
   $("criticalDaysInput").value = config.alerts?.criticalDays ?? 3;
 
-  $("loginUserCodeInput").placeholder = config.hasLoginUserCode ? "已保存，留空不修改" : "填写服务号里的缴费账号";
-  $("passwordInput").placeholder = config.hasPassword ? "已保存，留空不修改" : "填写查询密码";
+  $("loginUserCodeInput").value = "";
+  $("passwordInput").value = "";
+  $("loginUserCodeInput").placeholder = config.hasLoginUserCode
+    ? `已保存 ${config.maskedLoginUserCode || "账号"}，留空不修改`
+    : "填写服务号里的缴费账号";
+  $("passwordInput").placeholder = config.hasPassword ? "密码已保存，留空不修改" : "填写查询密码";
+  $("loginUserCodeHint").textContent = config.hasLoginUserCode
+    ? `已保存账号：${config.maskedLoginUserCode || "已脱敏"}。留空表示不修改，重新输入会覆盖旧账号。`
+    : "还没有保存账号，请填写服务号里的缴费账号。";
+  $("passwordHint").textContent = config.hasPassword
+    ? "查询密码已保存。留空表示不修改，重新输入会覆盖旧密码。"
+    : "还没有保存密码，请填写查询密码。";
   setStatus(config.configured ? "配置已完成，可以采集或打开状态屏" : "请填写账号和密码后保存", config.configured ? "ok" : "neutral");
 }
 
